@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>隨機迷宮生成與尋路</title>
+    <style>
+        body {
+            font-family: 'Microsoft JhengHei', Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: white;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-generate {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+        }
+
+        .btn-generate:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn-solve {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+        }
+
+        .btn-solve:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(78, 205, 196, 0.4);
+        }
+
+        .btn-clear {
+            background: linear-gradient(45deg, #a8e6cf, #7fcdcd);
+        }
+
+        .btn-clear:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(168, 230, 207, 0.4);
+        }
+
+        .maze-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        canvas {
+            border: 3px solid #333;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .info {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .status {
+            text-align: center;
+            margin: 10px 0;
+            font-weight: bold;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎮 隨機迷宮生成與尋路</h1>
+        
+        <div class="controls">
+            <button class="btn-generate" onclick="generateMaze()">生成新迷宮</button>
+            <button class="btn-solve" onclick="solveMaze()">開始尋路</button>
+            <button class="btn-clear" onclick="clearPath()">清除路徑</button>
+        </div>
+
+        <div class="status" id="status">點擊「生成新迷宮」開始遊戲</div>
+
+        <div class="maze-container">
+            <canvas id="mazeCanvas" width="600" height="600"></canvas>
+        </div>
+
+        <div class="info">
+            <p>🔴 紅色：起點 | 🟢 綠色：終點 | 🔵 藍色：尋路過程 | ⚪ 白色：通道 | ⚫ 深色：牆壁</p>
+            <p>💡 提示：迷宮使用遞歸回溯算法生成，尋路使用A*算法</p>
+        </div>
+    </div>
+
+    <script>
+        class Maze {
+            constructor(width, height) {
+                this.width = width;
+                this.height = height;
+                this.cellSize = 20;
+                this.canvas = document.getElementById('mazeCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.maze = [];
+                this.start = { x: 1, y: 1 };
+                this.end = { x: width - 2, y: height - 2 };
+                this.path = [];
+                this.visited = [];
+                this.isGenerating = false;
+                this.isSolving = false;
+            }
+
+            // 初始化迷宮（全部為牆壁）
+            initializeMaze() {
+                this.maze = [];
+                for (let y = 0; y < this.height; y++) {
+                    this.maze[y] = [];
+                    for (let x = 0; x < this.width; x++) {
+                        this.maze[y][x] = 1; // 1 = 牆壁, 0 = 通道
+                    }
+                }
+            }
+
+            // 遞歸回溯法生成迷宮
+            generateMaze() {
+                this.initializeMaze();
+                this.isGenerating = true;
+                this.updateStatus('正在生成迷宮...');
+                
+                // 使用遞歸回溯算法
+                this.carvePassage(1, 1);
+                
+                // 確保起點和終點是通道
+                this.maze[this.start.y][this.start.x] = 0;
+                this.maze[this.end.y][this.end.x] = 0;
+                
+                this.isGenerating = false;
+                this.updateStatus('迷宮生成完成！點擊「開始尋路」尋找路徑');
+                this.debugMaze(); // 調試信息
+                this.drawMaze();
+            }
+
+            // 遞歸回溯核心算法
+            carvePassage(x, y) {
+                this.maze[y][x] = 0; // 標記為通道
+                
+                // 隨機打亂方向順序
+                const directions = [
+                    { dx: 0, dy: -2 }, // 上
+                    { dx: 2, dy: 0 },  // 右
+                    { dx: 0, dy: 2 },  // 下
+                    { dx: -2, dy: 0 }  // 左
+                ];
+                
+                // Fisher-Yates 洗牌算法
+                for (let i = directions.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [directions[i], directions[j]] = [directions[j], directions[i]];
+                }
+                
+                // 嘗試每個方向
+                for (const dir of directions) {
+                    const nx = x + dir.dx;
+                    const ny = y + dir.dy;
+                    
+                    // 檢查邊界和是否已訪問
+                    if (nx > 0 && nx < this.width - 1 && 
+                        ny > 0 && ny < this.height - 1 && 
+                        this.maze[ny][nx] === 1) {
+                        
+                        // 打通牆壁
+                        this.maze[y + dir.dy / 2][x + dir.dx / 2] = 0;
+                        
+                        // 遞歸
+                        this.carvePassage(nx, ny);
+                    }
+                }
+            }
+
+            // A* 尋路算法
+            async solveMaze() {
+                if (this.isGenerating) {
+                    this.updateStatus('請等待迷宮生成完成');
+                    return;
+                }
+                
+                if (this.isSolving) {
+                    this.updateStatus('尋路正在進行中...');
+                    return;
+                }
+                
+                this.isSolving = true;
+                this.path = [];
+                this.visited = [];
+                this.updateStatus('正在尋找路徑...');
+                
+                const openSet = [];
+                const closedSet = new Set();
+                const cameFrom = new Map();
+                const gScore = new Map();
+                const fScore = new Map();
+                
+                // 初始化起點
+                const startKey = `${this.start.x},${this.start.y}`;
+                openSet.push(this.start);
+                gScore.set(startKey, 0);
+                fScore.set(startKey, this.heuristic(this.start, this.end));
+                
+                while (openSet.length > 0) {
+                    // 找到f分數最小的節點
+                    let current = openSet[0];
+                    let currentIndex = 0;
+                    
+                    for (let i = 1; i < openSet.length; i++) {
+                        const currentKey = `${current.x},${current.y}`;
+                        const nodeKey = `${openSet[i].x},${openSet[i].y}`;
+                        if (fScore.get(nodeKey) < fScore.get(currentKey)) {
+                            current = openSet[i];
+                            currentIndex = i;
+                        }
+                    }
+                    
+                    // 從開放集合中移除當前節點
+                    openSet.splice(currentIndex, 1);
+                    const currentKey = `${current.x},${current.y}`;
+                    closedSet.add(currentKey);
+                    this.visited.push({...current});
+                    
+                    // 可視化尋路過程
+                    this.drawMaze();
+                    await this.sleep(50);
+                    
+                    // 檢查是否到達終點
+                    if (current.x === this.end.x && current.y === this.end.y) {
+                        this.reconstructPath(cameFrom, current);
+                        this.isSolving = false;
+                        this.updateStatus(`找到路徑！路徑長度：${this.path.length} 步`);
+                        this.drawMaze();
+                        return;
+                    }
+                    
+                    // 檢查鄰居
+                    const neighbors = this.getNeighbors(current);
+                    for (const neighbor of neighbors) {
+                        const neighborKey = `${neighbor.x},${neighbor.y}`;
+                        
+                        if (closedSet.has(neighborKey)) continue;
+                        
+                        const tentativeGScore = gScore.get(currentKey) + 1;
+                        
+                        if (!openSet.some(node => node.x === neighbor.x && node.y === neighbor.y)) {
+                            openSet.push(neighbor);
+                        } else if (tentativeGScore >= (gScore.get(neighborKey) || Infinity)) {
+                            continue;
+                        }
+                        
+                        cameFrom.set(neighborKey, current);
+                        gScore.set(neighborKey, tentativeGScore);
+                        fScore.set(neighborKey, tentativeGScore + this.heuristic(neighbor, this.end));
+                    }
+                }
+                
+                this.isSolving = false;
+                this.updateStatus('未找到路徑！');
+            }
+
+            // 重建路徑
+            reconstructPath(cameFrom, current) {
+                this.path = [current];
+                let currentKey = `${current.x},${current.y}`;
+                
+                while (cameFrom.has(currentKey)) {
+                    current = cameFrom.get(currentKey);
+                    this.path.unshift(current);
+                    currentKey = `${current.x},${current.y}`;
+                }
+            }
+
+            // 啟發式函數（曼哈頓距離）
+            heuristic(a, b) {
+                return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+            }
+
+            // 獲取鄰居節點
+            getNeighbors(node) {
+                const neighbors = [];
+                const directions = [
+                    { dx: 0, dy: -1 }, // 上
+                    { dx: 1, dy: 0 },  // 右
+                    { dx: 0, dy: 1 },  // 下
+                    { dx: -1, dy: 0 }  // 左
+                ];
+                
+                for (const dir of directions) {
+                    const x = node.x + dir.dx;
+                    const y = node.y + dir.dy;
+                    
+                    if (x >= 0 && x < this.width && 
+                        y >= 0 && y < this.height && 
+                        this.maze[y][x] === 0) {
+                        neighbors.push({ x, y });
+                    }
+                }
+                
+                return neighbors;
+            }
+
+            // 繪製迷宮
+            drawMaze() {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                // 繪製迷宮
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        const cellX = x * this.cellSize;
+                        const cellY = y * this.cellSize;
+                        
+                        if (this.maze[y][x] === 1) {
+                            // 牆壁
+                            this.ctx.fillStyle = '#2c3e50';
+                            this.ctx.fillRect(cellX, cellY, this.cellSize, this.cellSize);
+                        } else {
+                            // 通道
+                            this.ctx.fillStyle = '#ecf0f1';
+                            this.ctx.fillRect(cellX, cellY, this.cellSize, this.cellSize);
+                        }
+                    }
+                }
+                
+                // 繪製訪問過的節點
+                this.ctx.fillStyle = '#3498db';
+                for (const node of this.visited) {
+                    const cellX = node.x * this.cellSize;
+                    const cellY = node.y * this.cellSize;
+                    this.ctx.fillRect(cellX + 2, cellY + 2, this.cellSize - 4, this.cellSize - 4);
+                }
+                
+                // 繪製路徑
+                this.ctx.fillStyle = '#e74c3c';
+                for (const node of this.path) {
+                    const cellX = node.x * this.cellSize;
+                    const cellY = node.y * this.cellSize;
+                    this.ctx.fillRect(cellX + 4, cellY + 4, this.cellSize - 8, this.cellSize - 8);
+                }
+                
+                // 繪製起點
+                this.ctx.fillStyle = '#e74c3c';
+                const startX = this.start.x * this.cellSize;
+                const startY = this.start.y * this.cellSize;
+                this.ctx.beginPath();
+                this.ctx.arc(startX + this.cellSize / 2, startY + this.cellSize / 2, this.cellSize / 3, 0, 2 * Math.PI);
+                this.ctx.fill();
+                
+                // 繪製終點
+                this.ctx.fillStyle = '#27ae60';
+                const endX = this.end.x * this.cellSize;
+                const endY = this.end.y * this.cellSize;
+                this.ctx.beginPath();
+                this.ctx.arc(endX + this.cellSize / 2, endY + this.cellSize / 2, this.cellSize / 3, 0, 2 * Math.PI);
+                this.ctx.fill();
+            }
+
+            // 清除路徑
+            clearPath() {
+                this.path = [];
+                this.visited = [];
+                this.updateStatus('路徑已清除');
+                this.drawMaze();
+            }
+
+            // 更新狀態
+            updateStatus(message) {
+                document.getElementById('status').textContent = message;
+            }
+
+            // 延遲函數
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            // 調試：檢查迷宮連通性
+            debugMaze() {
+                console.log('迷宮尺寸:', this.width, 'x', this.height);
+                console.log('起點:', this.start);
+                console.log('終點:', this.end);
+                console.log('起點是否為通道:', this.maze[this.start.y][this.start.x] === 0);
+                console.log('終點是否為通道:', this.maze[this.end.y][this.end.x] === 0);
+                
+                // 計算通道數量
+                let pathCount = 0;
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        if (this.maze[y][x] === 0) pathCount++;
+                    }
+                }
+                console.log('通道數量:', pathCount);
+            }
+        }
+
+        // 創建迷宮實例
+        const maze = new Maze(29, 29); // 奇數尺寸確保有邊界
+
+        // 全局函數
+        function generateMaze() {
+            maze.generateMaze();
+        }
+
+        function solveMaze() {
+            maze.solveMaze();
+        }
+
+        function clearPath() {
+            maze.clearPath();
+        }
+
+        // 頁面加載完成後自動生成第一個迷宮
+        window.addEventListener('load', () => {
+            generateMaze();
+        });
+    </script>
+</body>
+</html>
